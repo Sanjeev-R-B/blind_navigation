@@ -1,0 +1,7 @@
+models/
+__pycache__/
+*.pyc
+*.onnx
+*.tflite
+.env
+venv/
