@@ -292,10 +292,257 @@ phase1_detection/utils/validation_logger.py   # logs detections to CSV with time
 
 ---
 
+
+# Phase 2 — Distance Estimation + Basic Alerts
+
+> **Blind Navigator Project**  
+> Desktop implementation complete. Android port pending (teammate, Tasks 6 & 7).
+
+---
+
+## Overview
+
+Phase 2 builds on top of the Phase 1 detection pipeline to answer one question for every detected object: **how far away is it?** Once distance is known, the system speaks alerts using a non-blocking voice engine and shows a live color-coded danger zone on screen.
+
+---
+
+## What Was Built
+
+### 1. Focal Length Calibration (`distance/calibration.py`)
+
+A one-time routine that computes the camera's focal length in pixels. The user holds an A4 sheet (real height 0.297m) at exactly 1 metre from the camera, presses SPACE to capture the frame, then clicks the top and bottom edges of the sheet. The script computes:
+
+```
+focal_length = (pixel_height × known_distance) / real_height
+```
+
+Result is saved to `distance/calibration.json`. Focal length computed: **888.89px** (recalibrated to account for partial body detection).
+
+---
+
+### 2. Known Heights Lookup Table (`distance/known_heights.json`)
+
+A JSON file containing real-world heights (in metres) for all navigation-relevant COCO classes. Examples:
+
+| Object | Height (m) |
+|---|---|
+| person | 0.23 (head height — recalibrated) |
+| car | 1.50 |
+| bicycle | 1.10 |
+| chair | 0.90 |
+| bottle | 0.25 |
+
+34 classes total covering everyday indoor and outdoor obstacles.
+
+---
+
+### 3. Pinhole Distance Estimator (`distance/pinhole_estimator.py`)
+
+Core distance formula applied to every bounding box from YOLO:
+
+```
+distance = (focal_length × real_height) / pixel_height
+```
+
+Additional features:
+- Horizontal zone detection — classifies each object as `left`, `centre`, or `right` based on bounding box centre x position
+- Distance clamped to 0.1m – 10.0m range
+- Boxes under 20px height marked unreliable
+- All detections sorted nearest-first
+- Accuracy: ~±15% error in 1–4m range under normal indoor lighting
+
+---
+
+### 4. Clipping Detector (`utils/clip_detector.py`)
+
+Detects when an object is so close its bounding box clips the bottom of the frame — at which point the pinhole formula becomes unreliable. Triggers a priority "very close, stop" alert instead of a distance estimate.
+
+Threshold tuned to `0.99` frame height with a minimum distance condition of `< 1.5m` to avoid false triggers on seated users whose upper body naturally clips the frame.
+
+---
+
+### 5. TTS Engine (`audio/tts_engine.py`)
+
+Non-blocking voice alert system using a dedicated background thread and a Python `queue.Queue`. The detection loop drops messages into the queue and continues running at full FPS. The TTS thread picks messages independently and speaks them.
+
+**Initial approach:** `pyttsx3` library  
+**Problem:** On Windows, `pyttsx3` only spoke the last queued message when messages were added faster than speech completed — a known Windows COM threading conflict.  
+**Solution:** Replaced with Windows SAPI via PowerShell subprocess call:
+
+```python
+ps_script = (
+    f"Add-Type -AssemblyName System.Speech; "
+    f"$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+    f"$s.Speak('{text}');"
+)
+subprocess.run(["powershell", "-Command", ps_script])
+```
+
+This bypasses pyttsx3 entirely and calls Windows' built-in speech engine directly. All 4 test messages spoken correctly after this fix.
+
+---
+
+### 6. Alert Formatter (`audio/alert_formatter.py`)
+
+Converts raw distance estimates into natural spoken sentences:
+
+```
+"person", 2.1m, "left"   →   "Person, 2.1 metres, left"
+clipping "car"            →   "Car, very close, stop"
+```
+
+Suppression rules:
+- Objects beyond 5.0m → no alert
+- Distance must change by ≥0.5m since last alert for same object → prevents repetition
+- Centre zone omitted from speech to keep alerts concise
+- High-risk classes only for clipping alerts: person, car, motorcycle, bus, truck, bicycle
+- False-positive prone indoor classes filtered: refrigerator, oven, microwave, sink
+
+---
+
+### 7. Zone Indicator (`run_phase2.py`)
+
+Live color-coded border and status bar overlaid on the camera feed:
+
+| Distance | Zone | Color |
+|---|---|---|
+| < 0.8m | 🔴 DANGER | Red border + red bar |
+| 0.8m – 1.5m | 🟠 CAUTION | Orange border + orange bar |
+| 1.5m – 3.0m | 🟢 SAFE | Green border + green bar |
+| > 3.0m | — | No indicator |
+
+Thresholds tuned for laptop webcam demo at normal seated distance (~0.7m).
+
+---
+
+### 8. Full Pipeline (`run_phase2.py`)
+
+Wires all components together:
+
+```
+Webcam frame
+    → YOLODetector.detect()         # bounding boxes + labels
+    → estimate_all()                # pinhole distance per object
+    → check_all()                   # clipping check
+    → formatter.format_all()        # spoken text generation
+    → tts.speak()                   # voice output (background thread)
+    → bbox_renderer + distance overlay
+    → zone indicator overlay
+    → cv2.imshow()
+```
+
+Performance: **23 FPS** on Intel CPU laptop with full pipeline active.
+
+---
+
+## Depth Anything v2 — Implementation + Limitations
+
+### What Was Attempted
+
+Tasks 4 and 5 of Phase 2 required integrating Depth Anything v2 Small as a depth map fallback for unknown objects and background obstacles where the pinhole formula cannot apply (no known real-world height).
+
+Two files were written:
+
+**`depth/depth_anything.py`** — Loads the Depth Anything v2 Small ONNX model (94.47MB), preprocesses frames with ImageNet normalization, runs inference at 518×518 resolution, normalizes output depth map to 0–1 range, and provides region-level depth sampling for bounding boxes. Colorized visualization confirmed correct depth ordering — closer objects brighter, farther objects darker.
+
+**`depth/depth_fusion.py`** — Fusion layer combining pinhole estimates (for known objects) with depth map values (for unknown/unreliable objects). Architecture:
+- Known object + reliable pinhole → keep pinhole distance
+- Known object + unreliable pinhole → depth map flags close/far
+- Unknown object → depth map assigns conservative 0.8m estimate if close
+
+### Limitation — CPU Performance
+
+| Approach | FPS result | Outcome |
+|---|---|---|
+| Depth every frame, main thread | ~1 FPS | Unusable |
+| Depth every 10 frames, main thread | 4–7 FPS | Still unusable |
+| Depth in background thread, continuous | 4–6 FPS | CPU contention |
+| Depth in background thread, 2s sleep | 4–6 FPS | Still contention |
+| Reduced input size 518→224 | < 12 FPS | Below threshold |
+
+**Root cause:** Running two neural network inference sessions (YOLO + Depth Anything) simultaneously on CPU is not feasible at real-time speeds. Python's GIL prevents true parallel CPU computation, and depth inference at ~900ms per frame competes directly with the detection loop regardless of threading approach.
+
+**This is a hardware constraint, not a code bug.** The depth model code is correct — inference produces accurate depth maps as verified visually.
+
+### Solution — Android NPU
+
+Mobile phones include a dedicated **NPU (Neural Processing Unit)** designed specifically for neural network inference. On the target device (POCO C65, Android 15):
+
+- YOLO runs on CPU via ONNX Runtime (same as desktop)
+- Depth Anything runs on NPU via Android NNAPI or TFLite GPU delegate
+- Both run **truly in parallel** on separate hardware units
+
+The execution provider change for Android:
+```python
+# Desktop (CPU only)
+providers=["CPUExecutionProvider"]
+
+# Android (NPU via NNAPI)
+providers=["NNAPIExecutionProvider", "CPUExecutionProvider"]
+```
+
+No other code changes required. Depth fusion wiring into the Android pipeline is assigned to the teammate handling Tasks 6 and 7.
+
+---
+
+## How to Run
+
+```bash
+cd blind_nav
+venv\Scripts\activate
+
+# Full Phase 2 pipeline (pinhole + alerts + zone indicator)
+python phase2_distance/run_phase2.py
+
+# Depth model test only
+python phase2_distance/depth/depth_anything.py
+
+# Depth fusion test only
+python phase2_distance/depth/depth_fusion.py
+```
+
+---
+
+## Phase 2 Exit Criteria
+
+| Criteria | Status |
+|---|---|
+| ≤15% distance error in 1–4m range | ✅ |
+| Works in real indoor lighting | ✅ |
+| Non-blocking voice alerts | ✅ |
+| Three-zone DANGER/CAUTION/SAFE indicator | ✅ |
+| Clipping detection | ✅ |
+| Depth Anything v2 model integrated | ✅ Code complete |
+| Depth fusion real-time on desktop | ❌ CPU hardware limitation |
+| Depth fusion on Android NPU | ⏳ Pending Android port |
+
+---
+
+## File Structure
+
+```
+phase2_distance/
+├── distance/
+│   ├── calibration.py          # Focal length calibration routine
+│   ├── pinhole_estimator.py    # Core distance formula
+│   ├── calibration.json        # Saved focal length (888.89px)
+│   └── known_heights.json      # Real-world heights for 34 COCO classes
+├── depth/
+│   ├── depth_anything.py       # Depth Anything v2 Small ONNX wrapper
+│   ├── depth_fusion.py         # Pinhole + depth map fusion layer
+│   └── models/
+│       └── depth_v2_small.onnx # 94.47MB — not committed to git
+├── audio/
+│   ├── tts_engine.py           # Non-blocking TTS via Windows SAPI
+│   └── alert_formatter.py      # Formats spoken alert text
+├── utils/
+│   └── clip_detector.py        # Too-close detection via frame clipping
+└── run_phase2.py               # Full pipeline entry point
+```
+
 ## Roadmap
 
 - **Phase 1** — Core Detection: Camera + YOLO 🔄 (tasks 01–05 done, 06–07 pending)
 - **Phase 2** — Distance estimation (depth model, spatial audio cues)
 - **Phase 3** — Android port (CameraX, TFLite)
 - **Phase 4** — Navigation assistant (path guidance, voice output)
-
