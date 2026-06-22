@@ -45,7 +45,7 @@ android {
 
 chaquopy {
     defaultConfig {
-        version = "3.10"
+        version = "3.11"
         pip {
             // numpy is all we need — ONNX inference runs in Kotlin via Java ORT API,
             // and NMS is implemented in pure numpy (no opencv dependency needed).
