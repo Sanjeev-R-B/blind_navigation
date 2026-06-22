@@ -29,8 +29,7 @@ jobs:
         python-version: '3.11'
 
     - name: Grant Execute Permission for Gradlew
-      run: chmod +x android/gradlew
-      working-directory: android
+      run: chmod +x ./android/gradlew
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug
