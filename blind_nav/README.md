@@ -28,56 +28,6 @@ AI-powered navigation assistant for visually impaired users. This project uses r
 
 ---
 
-## 📲 How to Download & Install the APK File
-
-To use the application immediately on your phone without setting up Android Studio:
-1. **Go to the GitHub Repository** page.
-2. Click on the **Actions** tab at the top of the page.
-3. Select the latest run of the **Build Android APK** workflow.
-4. Under the **Artifacts** section at the bottom, click on `blind-nav-app-debug` to download the ZIP file.
-5. Extract the ZIP to get `app-debug.apk`.
-6. Transfer the `.apk` file to your phone, open it, and select **Install** (ensure "Install from Unknown Sources" is enabled in your phone's settings).
-
----
-
-## 🛠️ How to Compile/Build the APK Locally (After Cloning)
-
-If you have cloned the project and want to build the APK yourself, you can do so using Android Studio or the command line.
-
-> [!TIP]
-> **Use Android Studio (Option 1):** If you use the Android Studio method, clicking the green "Run" button will automatically build the app and install it directly onto your connected phone.
-
-### Option 1: Using Android Studio (Recommended)
-1. Open **Android Studio**.
-2. Click on **Open** and select the `android/` directory from the cloned repository.
-3. Wait for Gradle to finish syncing.
-4. Connect your Android device via USB (ensure **USB debugging** is enabled in your phone's Developer Options).
-5. Click the green **Run** button (or press `Shift + F10`) in the top toolbar to build and install the app directly on your device.
-
-### Option 2: Using Command Line
-1. Open your terminal and navigate to the `android/` directory:
-   ```bash
-   cd android
-   ```
-2. Run the build command:
-   * **Windows (PowerShell)**:
-     ```powershell
-     .\gradlew assembleDebug
-     ```
-   * **macOS / Linux**:
-     ```bash
-     chmod +x gradlew
-     ./gradlew assembleDebug
-     ```
-3. Find your built APK on your computer at:
-   `android/app/build/outputs/apk/debug/app-debug.apk`
-4. **Transfer to your phone:** Unlike Android Studio, this method does not automatically install the app on your phone. You must manually transfer the `.apk` file to your phone (e.g., via USB cable, Google Drive) and install it from there. Alternatively, if your phone is connected via USB, you can install it using `adb`:
-   ```bash
-   adb install app/build/outputs/apk/debug/app-debug.apk
-   ```
-
----
-
 ## Phase 1 — Core Detection: Camera + YOLO (In Progress 🔄)
 
 > Goal: Get reliable real-time object detection running on the phone at ≥12–15 FPS — the non-negotiable foundation.
@@ -91,7 +41,7 @@ If you have cloned the project and want to build the APK yourself, you can do so
 | 03 | Bounding boxes + class labels overlay on frames | ✅ Done |
 | 04 | FPS measurement loop + profiling | ✅ Done |
 | 05 | Input resolution tuning: 320×320 → 416×416 | ✅ Done |
-| 06 | Native Android camera via CameraX API | ✅ Done |
+| 06 | Native Android camera via CameraX API | ⏳ Pending |
 | 07 | Validate: person, car, door, stairs, pole, wall | ⏳ Pending |
 
 ### Tech stack
@@ -198,7 +148,7 @@ The model is exported with `dynamic=True` so it accepts variable input resolutio
 
 | Criteria | Status |
 |----------|--------|
-| Live detection ≥ 12 FPS on actual target phone | ✅ Desktop: 30.6 FPS — Android: Integrated |
+| Live detection ≥ 12 FPS on actual target phone | ⏳ Desktop: ✅ 30.6 FPS — Android: pending task 06 |
 | Critical obstacles reliably detected at 1–5m range | ⏳ Pending task 07 (door, stairs, pole, wall) |
 | Clean bounding boxes with NMS | ✅ |
 | Nav-relevant classes visually highlighted | ✅ color-coded by class |
@@ -236,7 +186,58 @@ venv/
 
 ## Pending Tasks — Help Wanted 🙋
 
-The desktop pipeline (tasks 01–05) and the core Android integration (Task 06) are fully working. The remaining task to close Phase 1 is below.
+The desktop pipeline (tasks 01–05) is fully working. The two remaining tasks to close Phase 1 are below. Each has enough detail to pick up and implement independently.
+
+---
+
+### Task 06 — Native Android camera via CameraX API
+
+**Goal:** Replace `camera_feed.py` (OpenCV webcam) with a native Android camera feed so the detection pipeline runs on-device on a phone.
+
+**Approach — Chaquopy + Kivy + CameraX**
+
+The roadmap uses Chaquopy (Python-in-Android) and Kivy (UI). The rough integration path:
+
+1. **Set up Android Studio project with Chaquopy**
+   - Create a new Android project in Android Studio
+   - Add Chaquopy to `build.gradle` — it lets you run Python inside an Android app
+   - Add `onnxruntime`, `numpy`, `opencv-python` as Chaquopy pip dependencies in `build.gradle`
+   - Copy `phase1_detection/detection/` and `phase1_detection/utils/` into the Android assets
+
+2. **Wire CameraX to deliver frames to Python**
+   - Set up a `CameraX ImageAnalysis` use case in Kotlin/Java
+   - In the `analyze(ImageProxy)` callback, convert the `ImageProxy` to a byte array
+   - Pass the byte array across the Chaquopy bridge into Python as a numpy array
+   - Run `detector.detect(frame)` exactly as in `camera_feed.py`
+
+3. **Render results with Kivy**
+   - Use a Kivy `Canvas` overlay to draw bounding boxes on top of the camera preview
+   - Mirror the logic in `bbox_renderer.py` — same colors, same label format
+
+4. **Target FPS:** ≥12 FPS on a mid-range Android phone (Snapdragon 600-series or equivalent)
+   - Start with 416×416 input (already benchmarked as optimal)
+   - If FPS is too low, drop to 320×320 — the dynamic ONNX model supports it
+
+**Files to create:**
+```
+blind-nav/
+└── phase1_detection/
+    └── camera/
+        └── camera_android.py    # Python side: receives frame bytes, runs detector, returns results
+android/
+├── app/
+│   ├── build.gradle             # Chaquopy config + pip deps
+│   └── src/main/
+│       ├── java/.../
+│       │   └── CameraActivity.kt  # CameraX setup + Chaquopy bridge
+│       └── res/layout/
+│           └── activity_main.xml
+```
+
+**Useful references:**
+- Chaquopy docs: https://chaquo.com/chaquopy/doc/current/android.html
+- CameraX ImageAnalysis: https://developer.android.com/training/camerax/analyze
+- ONNX Runtime Android: https://onnxruntime.ai/docs/tutorials/mobile/
 
 ---
 
@@ -291,68 +292,10 @@ phase1_detection/utils/validation_logger.py   # logs detections to CSV with time
 
 ---
 
-## Phase 2 — Distance Estimation & Audio Alerts (Done ✅)
-
-> Goal: Estimate distance to detected objects and provide non-intrusive voice alerts to the user.
-
-### What was built
-
-Phase 2 introduces a lightweight distance estimation module and an audio alert system:
-- **Pinhole Camera Model**: Estimates object distance using bounding box dimensions and camera focal length (instead of a heavy depth model, preserving FPS).
-- **Clipping Detection**: Detects if objects are cut off by the camera frame, indicating they are "too close" and require immediate attention.
-- **Zone Indicators**: Visually categorizes distance into Safe, Caution, and Danger zones with color-coded UI overlays.
-- **TTS Engine**: Provides spoken voice alerts for critical objects every few frames to avoid overwhelming the user.
-
-### How to run
-
-Ensure you are in the `blind_nav` directory and run:
-
-```bash
-cd blind_nav
-python phase2_distance/run_phase2.py
-```
-
----
-
-## 📁 Android Folder Structure & Performance Tuning
-
-If you're looking to modify how the application behaves on Android, particularly to tune its performance and distance thresholds, here is the relevant folder structure:
-
-```text
-android/
-└── app/
-    ├── build.gradle.kts        # Android build config and dependencies
-    └── src/
-        └── main/
-            ├── java/           # Kotlin UI & CameraX implementation
-            ├── res/            # Layouts and visual resources
-            └── python/
-                └── camera_android.py   # Core logic for detection, distance, and alerts
-```
-
-### Where to Evaluate & Tune Model Performance
-
-To adjust the app's sensitivity, thresholds, and performance, you will primarily modify **`android/app/src/main/python/camera_android.py`**. 
-
-Inside this file, you can tweak the following key values:
-*   **Distance Zones (`DANGER_THRESHOLD`, `CAUTION_THRESHOLD`, `SAFE_THRESHOLD`)**: Change the cutoffs (in metres) for when objects are flagged in the UI as dangerous vs safe.
-*   **Audio Alert Frequency (`MIN_CHANGE_TO_ALERT`, `MAX_ALERT_DISTANCE`)**: Determines how often the TTS engine speaks to the user. Tweak these to make the app less "chatty" or more responsive.
-*   **Clipping Sensitivity (`CLIP_THRESHOLD`)**: Adjust what percentage of the frame an object must occupy to trigger an immediate "too close" warning.
-*   **Confidence Threshold (`conf_threshold` in `postprocess_output`)**: Adjust this to reduce false positives (increase threshold) or catch more objects (lower threshold).
-
-### Evaluation Metrics (Android Device)
-
-Based on recent device testing, the application achieves the following performance characteristics on-device:
-
-*   **Hardware Acceleration**: Successfully utilizes **NNAPI (NPU)** for ONNX Runtime acceleration, offloading inference from the CPU.
-*   **Focal Length**: Uses a manual hardcoded focal length of `1400.0px` for distance estimation.
-*   **Framerate (FPS)**: Consistently maintains **~10.0 FPS** (fluctuating between 9.8 and 10.3 FPS) during continuous real-time object detection, distance estimation, and TTS audio feedback.
-
----
-
 ## Roadmap
 
-- **Phase 1** — Core Detection: Camera + YOLO 🔄 (tasks 01–06 done, 07 pending)
-- **Phase 2** — Distance estimation & Audio Alerts ✅ (Done)
-- **Phase 3** — Android port (CameraX, Chaquopy) ✅ (Done)
+- **Phase 1** — Core Detection: Camera + YOLO 🔄 (tasks 01–05 done, 06–07 pending)
+- **Phase 2** — Distance estimation (depth model, spatial audio cues)
+- **Phase 3** — Android port (CameraX, TFLite)
 - **Phase 4** — Navigation assistant (path guidance, voice output)
+
