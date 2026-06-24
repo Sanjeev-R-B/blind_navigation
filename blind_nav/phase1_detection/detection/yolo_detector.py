@@ -22,11 +22,15 @@ NAV_CLASSES = {
     "chair", "couch", "bed", "dining table", "toilet",
     "bottle", "bowl", "laptop", "cell phone", "book"
 }
+DEMO_CLASSES = {'person', 'chair', 'book', 'cell phone', 'backpack'}
 
 class YOLODetector:
     def __init__(self, model_path: str, input_size: int = 416, conf_threshold: float = 0.25):
         self.engine = ONNXInference(model_path, input_size)
         self.conf_threshold = conf_threshold
+
+    # Only these classes will be detected — everything else ignored
+    
 
     def detect(self, frame):
         h, w = frame.shape[:2]
@@ -36,12 +40,16 @@ class YOLODetector:
         results = []
         for det in detections:
             label = COCO_CLASSES[det["class_id"]] if det["class_id"] < len(COCO_CLASSES) else "unknown"
+
+        # Whitelist filter — only demo classes pass
+            if label not in DEMO_CLASSES:
+               continue
+
             results.append({
-                "label": label,
-                "score": det["score"],
-                "box": det["box"],
-                "is_nav_relevant": label in NAV_CLASSES
-            })
+               "label": label,
+               "score": det["score"],
+               "box":   det["box"],
+               "is_nav_relevant": label in NAV_CLASSES
+        })
 
         return results
-    
