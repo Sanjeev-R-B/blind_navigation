@@ -18,11 +18,11 @@ from phase2_distance.audio.tts_engine import TTSEngine
 
 MODEL_PATH = os.path.join(ROOT, 'phase1_detection', 'models', 'yolov8n.onnx')
 
-ALERT_EVERY_N_FRAMES = 60        # ~2 seconds at 30fps
+ALERT_EVERY_N_FRAMES = 45
 SUMMARY_EVERY_SECONDS = 4.0
 
-PANEL_W = 360
-GAP = 15
+PANEL_W = 360      # Dashboard width
+GAP = 15           # Gap between camera and dashboard
 
 DANGER_THRESHOLD = 0.8
 CAUTION_THRESHOLD = 1.5
@@ -120,6 +120,7 @@ def draw_dashboard(dashboard_area, estimates, scene_summary, fps_value):
     """Draw dashboard content onto the right panel"""
     h, w = dashboard_area.shape[:2]
     
+    # Semi-transparent dark background
     cv2.rectangle(dashboard_area, (0, 0), (w, h), (20, 20, 22), -1)
 
     y = 35
@@ -223,12 +224,10 @@ def run():
 
         cv2.imshow("blind-nav | Phase 2", combined)
 
-        # ====================== ALERTS ======================
         if frame_count % ALERT_EVERY_N_FRAMES == 0:
             alerts = formatter.format_all(estimates, clipping)
             for text, priority in alerts:
-                if text and text.strip():
-                    tts.speak(text, priority=priority)
+                tts.speak(text, priority=priority)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
