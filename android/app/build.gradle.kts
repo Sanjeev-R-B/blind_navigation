@@ -106,3 +106,24 @@ dependencies {
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 }
+
+tasks.register<Copy>("syncPythonPipeline") {
+    from("../../blind_nav") {
+        include("**/*.py")
+        include("**/*.json")
+        exclude("venv/**")
+        exclude("**/*test*")
+        exclude("**/models/**")
+    }
+    into("src/main/python/blind_nav")
+}
+
+tasks.named("preBuild") {
+    dependsOn("syncPythonPipeline")
+}
+
+tasks.configureEach {
+    if (name.contains("PythonSources")) {
+        dependsOn("syncPythonPipeline")
+    }
+}

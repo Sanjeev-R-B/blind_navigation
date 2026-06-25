@@ -1,0 +1,7 @@
+{
+  "person":    0.23,
+  "chair":     0.90,
+  "book":      0.22,
+  "cell phone": 0.15,
+  "backpack":  0.50
+}
