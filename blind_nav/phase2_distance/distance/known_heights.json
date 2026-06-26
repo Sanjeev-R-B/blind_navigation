@@ -1,7 +1,15 @@
 {
-  "person":    0.23,
-  "chair":     0.90,
-  "book":      0.22,
+  "person":     0.23,
+  "chair":      0.90,
+  "book":       0.22,
   "cell phone": 0.15,
-  "backpack":  0.50
+  "backpack":   0.50,
+
+  "door":       2.05,
+  "wall":       2.40,
+  "car":        1.50,
+  "bicycle":    1.10,
+  "motorcycle": 1.20,
+  "truck":      2.80,
+  "dining table":0.75
 }
