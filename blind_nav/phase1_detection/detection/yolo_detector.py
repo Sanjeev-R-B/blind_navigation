@@ -22,20 +22,25 @@ NAV_CLASSES = {
     "chair", "couch", "bed", "dining table", "toilet",
     "bottle", "bowl", "laptop", "cell phone", "book"
 }
-DEMO_CLASSES = {'person', 'chair', 'book', 'cell phone', 'backpack'}
+DEMO_CLASSES = {
+    'person', 'chair', 'book', 'cell phone', 'backpack',
+    'bicycle', 'motorcycle', 'car', 'truck','dining table'
+}
 
 class YOLODetector:
     def __init__(self, model_path: str, input_size: int = 416, conf_threshold: float = 0.25):
         self.engine = ONNXInference(model_path, input_size)
         self.conf_threshold = conf_threshold
+        self.low_conf_threshold = 0.1
 
     # Only these classes will be detected — everything else ignored
     
 
-    def detect(self, frame):
+    def detect(self, frame,include_low=False):
         h, w = frame.shape[:2]
         raw_output = self.engine.run(frame)
-        detections = self.engine.postprocess(raw_output, w, h, self.conf_threshold)
+        thresh = self.low_conf_threshold if include_low else self.conf_threshold
+        detections = self.engine.postprocess(raw_output, w, h, thresh)
 
         results = []
         for det in detections:
@@ -53,3 +58,5 @@ class YOLODetector:
         })
 
         return results
+
+# In yolo_detector.py

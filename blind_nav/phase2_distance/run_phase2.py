@@ -15,7 +15,9 @@ from phase2_distance.distance.pinhole_estimator import estimate_all
 from phase2_distance.utils.clip_detector import check_all
 from phase2_distance.audio.alert_formatter import AlertFormatter
 from phase2_distance.audio.tts_engine import TTSEngine
-
+from phase2_distance.tracking.tracker import Tracker
+from phase2_distance.tracking.events import EventEmitter
+from phase2_distance.distance.pinhole_estimator import estimate_all, estimate
 MODEL_PATH = os.path.join(ROOT, 'phase1_detection', 'models', 'yolov8n.onnx')
 
 ALERT_EVERY_N_FRAMES = 45
@@ -54,7 +56,12 @@ def draw_distances(frame, estimates):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
     return frame
 
-
+def draw_track_ids(frame, tracks):
+    for tr in tracks:
+        x1, y1, _, _ = [int(v) for v in tr.box]
+        cv2.putText(frame, f"#{tr.id}", (x1 + 4, max(18, y1 + 22)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2, cv2.LINE_AA)
+    return frame
 def draw_zone_indicator(frame, estimates, clipping_labels):
     h, w = frame.shape[:2]
     status = None
@@ -172,13 +179,18 @@ def run():
     detector = YOLODetector(MODEL_PATH, input_size=416, conf_threshold=0.25)
     fps = FPSCounter()
     formatter = AlertFormatter()
+    tracker=Tracker()
     tts = TTSEngine(rate=150)
+
 
     tts.start()
 
     if not cap.isOpened():
         print("ERROR: Cannot open camera.")
         return
+
+    emitter = EventEmitter(int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                           int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
 
     print("Phase 2 running. Press Q to quit.")
     frame_count = 0
@@ -193,11 +205,27 @@ def run():
         h, w = frame.shape[:2]
         frame_count += 1
 
-        detections = detector.detect(frame)
+        t0 = time.time()
+        all_dets = detector.detect(frame, include_low=True)
+        t1 = time.time()
+        detections = [d for d in all_dets if d['score'] >= 0.25]
+        t_now = time.time()
+        tracks = tracker.update(all_dets, t_now)
+        t2 = time.time()
+
+        for e in emitter.process(tracks, tracker.removed_this_frame, t_now, frame_count):
+            print(f"[EVENT] {e['event']} #{e['track_id']} {e['class']} {e['exit_reason'] or ''}")
+
+        if frame_count % ALERT_EVERY_N_FRAMES == 0:
+            print(f"detect {1000*(t1-t0):.0f} ms | tracker {1000*(t2-t1):.1f} ms | boxes {len(all_dets)}")
+        # TEMPORARY CHECK (delete after verifying): runs on the clean frame,
+        # before render() draws anything on it.
+
         estimates = estimate_all(detections, w)
         clipping = check_all(estimates, h)
 
         frame = render(frame, detections)
+        frame = draw_track_ids(frame, tracks)
         frame = draw_distances(frame, estimates)
         frame = draw_zone_indicator(frame, estimates, clipping)
 
@@ -226,6 +254,7 @@ def run():
 
         if frame_count % ALERT_EVERY_N_FRAMES == 0:
             alerts = formatter.format_all(estimates, clipping)
+            print(f"[ALERTS] {time.strftime('%H:%M:%S')} {[(e['label'], e['distance']) for e in estimates]} -> {alerts}")
             for text, priority in alerts:
                 tts.speak(text, priority=priority)
 
