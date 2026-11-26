@@ -1,23 +1,25 @@
-# Percentage of frame height at which an object is considered "too close"
-CLIP_THRESHOLD = 0.99
+# Fraction of frame height — box bottom must reach this to count as touching the edge.
+# 0.90 catches real clips without being as brittle as 0.99.
+CLIP_THRESHOLD = 0.90
+CLIP_MAX_DISTANCE_M = 0.5
 
 
 def is_clipping(box, frame_h, distance=None):
     """
-    Check if a bounding box is clipping the bottom of the frame.
-    Only triggers if distance is also close (under 1.5m) or unknown.
+    True only when the box touches the bottom of the frame AND the
+    estimated distance is known and under CLIP_MAX_DISTANCE_M.
     """
     _, _, _, y2 = box
-    box_clips = (y2 / frame_h) > CLIP_THRESHOLD
-    
-    if not box_clips:
+    touches_bottom = (y2 / frame_h) > CLIP_THRESHOLD
+
+    if not touches_bottom:
         return False
-    
-    # If we have a distance estimate, only clip-alert if actually close
-    if distance is not None and distance > 1.5:
+
+    # No distance estimate -> don't trust the clip signal
+    if distance is None:
         return False
-    
-    return True
+
+    return distance < CLIP_MAX_DISTANCE_M
 
 def check_all(detections, frame_h):
     clipping = []
